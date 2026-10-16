@@ -9,6 +9,7 @@ import io.kestra.core.models.tasks.RunnableTask;
 import io.kestra.core.runners.RunContext;
 import io.kestra.core.serializers.FileSerde;
 import io.swagger.v3.oas.annotations.media.Schema;
+import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.NotNull;
 import lombok.AccessLevel;
 import lombok.Builder;
@@ -53,7 +54,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
 @NoArgsConstructor
 @Schema(
     title = "Consume messages from Apache Iggy stream and topic",
-    description = "Pulls messages from an Apache Iggy stream and topic, tracks consumer offsets, and stores consumed messages into Kestra internal storage."
+    description = "Pulls messages from an Apache Iggy stream and topic, tracks consumer offsets, and stores consumed messages into Kestra internal storage. Designed for UTF-8 text and JSON payloads; arbitrary binary payloads are not supported."
 )
 @Plugin(
     examples = {
@@ -164,7 +165,8 @@ public class Consume extends IggyConnection implements RunnableTask<Consume.Outp
     )
     @Builder.Default
     @PluginProperty(group = "advanced")
-    private Integer batchSize = 50;
+    @Min(1)
+    private Property<Integer> batchSize = Property.ofValue(50);
 
     @Getter(AccessLevel.NONE)
     @JsonIgnore
@@ -182,43 +184,49 @@ public class Consume extends IggyConnection implements RunnableTask<Consume.Outp
 
     @Override
     public Output run(RunContext runContext) throws Exception {
+        int rBatchSize = this.batchSize != null ?
+            runContext.render(this.batchSize).as(Integer.class).orElse(50) : 50;
+        if (rBatchSize < 1) {
+            throw new IllegalArgumentException("batchSize must be greater than or equal to 1, but got: " + rBatchSize);
+        }
+
+        String streamStr = runContext.render(this.stream).as(String.class).orElseThrow();
+        String topicStr = runContext.render(this.topic).as(String.class).orElseThrow();
+
+        StreamId streamId = resolveStreamId(streamStr);
+        TopicId topicId = resolveTopicId(topicStr);
+
+        Optional<Long> partId = this.partitionId != null ?
+            Optional.of(runContext.render(this.partitionId).as(Long.class).orElseThrow()) :
+            Optional.empty();
+
+        String cId = this.consumerId != null ?
+            runContext.render(this.consumerId).as(String.class).orElse("1") : "1";
+        Consumer consumer = NumberUtils.isDigits(cId) ?
+            Consumer.of(Long.parseLong(cId)) :
+            Consumer.of(ConsumerId.of(cId));
+
+        PollingKind kind = this.strategy != null ?
+            runContext.render(this.strategy).as(PollingKind.class).orElse(PollingKind.Next) :
+            PollingKind.Next;
+
+        BigInteger offsetVal = this.offset != null ?
+            runContext.render(this.offset).as(BigInteger.class).orElse(BigInteger.ZERO) :
+            BigInteger.ZERO;
+
+        PollingStrategy pollingStrategy = switch (kind) {
+            case First -> PollingStrategy.first();
+            case Last -> PollingStrategy.last();
+            case Offset -> PollingStrategy.offset(offsetVal);
+            case Timestamp -> PollingStrategy.timestamp(offsetVal);
+            default -> PollingStrategy.next();
+        };
+
+        boolean commit = this.autoCommit == null ||
+            runContext.render(this.autoCommit).as(Boolean.class).orElse(true);
+
         IggyBaseClient client = createClient(runContext);
         try {
-            String streamStr = runContext.render(this.stream).as(String.class).orElseThrow();
-            String topicStr = runContext.render(this.topic).as(String.class).orElseThrow();
-
-            StreamId streamId = resolveStreamId(streamStr);
-            TopicId topicId = resolveTopicId(topicStr);
-
-            Optional<Long> partId = this.partitionId != null ?
-                Optional.of(runContext.render(this.partitionId).as(Long.class).orElseThrow()) :
-                Optional.empty();
-
-            String cId = this.consumerId != null ?
-                runContext.render(this.consumerId).as(String.class).orElse("1") : "1";
-            Consumer consumer = NumberUtils.isDigits(cId) ?
-                Consumer.of(Long.parseLong(cId)) :
-                Consumer.of(ConsumerId.of(cId));
-
-            PollingKind kind = this.strategy != null ?
-                runContext.render(this.strategy).as(PollingKind.class).orElse(PollingKind.Next) :
-                PollingKind.Next;
-
-            BigInteger offsetVal = this.offset != null ?
-                runContext.render(this.offset).as(BigInteger.class).orElse(BigInteger.ZERO) :
-                BigInteger.ZERO;
-
-            PollingStrategy pollingStrategy = switch (kind) {
-                case First -> PollingStrategy.first();
-                case Last -> PollingStrategy.last();
-                case Offset -> PollingStrategy.offset(offsetVal);
-                case Timestamp -> PollingStrategy.timestamp(offsetVal);
-                default -> PollingStrategy.next();
-            };
-
-            boolean commit = this.autoCommit == null ||
-                runContext.render(this.autoCommit).as(Boolean.class).orElse(true);
-
             Instant pollStart = Instant.now();
             int total = 0;
             File outputFile = runContext.workingDir().createTempFile(".ion").toFile();
@@ -231,14 +239,14 @@ public class Consume extends IggyConnection implements RunnableTask<Consume.Outp
 
                     int currentTotal = total;
                     int maxRemaining = this.maxRecords != null ?
-                        runContext.render(this.maxRecords).as(Integer.class).map(max -> max - currentTotal).orElse(batchSize) :
-                        batchSize;
+                        runContext.render(this.maxRecords).as(Integer.class).map(max -> max - currentTotal).orElse(rBatchSize) :
+                        rBatchSize;
 
                     if (maxRemaining <= 0) {
                         break;
                     }
 
-                    long fetchCount = Math.min(batchSize, maxRemaining);
+                    long fetchCount = Math.min(rBatchSize, maxRemaining);
                     PolledMessages polled = client.messages().pollMessages(
                         streamId, topicId, partId, consumer, pollingStrategy, fetchCount, commit
                     );
@@ -251,12 +259,19 @@ public class Consume extends IggyConnection implements RunnableTask<Consume.Outp
                             runContext.render(this.pollDuration).as(Duration.class).orElse(Duration.ofSeconds(1)) :
                             Duration.ofSeconds(1);
 
-                        try {
-                            Thread.sleep(Math.min(waitDur.toMillis(), 500));
-                        } catch (InterruptedException e) {
-                            isActive.set(false);
-                            Thread.currentThread().interrupt();
-                            break;
+                        if (waitDur != null && !waitDur.isNegative() && !waitDur.isZero()) {
+                            long remainingMillis = waitDur.toMillis();
+                            while (remainingMillis > 0 && isActive.get()) {
+                                long sleepTime = Math.min(remainingMillis, 100);
+                                try {
+                                    Thread.sleep(sleepTime);
+                                } catch (InterruptedException e) {
+                                    isActive.set(false);
+                                    Thread.currentThread().interrupt();
+                                    break;
+                                }
+                                remainingMillis -= sleepTime;
+                            }
                         }
 
                         // If empty, check whether we should break or continue if maxDuration allows
@@ -289,7 +304,7 @@ public class Consume extends IggyConnection implements RunnableTask<Consume.Outp
                 .uri(uri)
                 .build();
         } finally {
-            closeClient(client);
+            closeClient(client, runContext.logger());
         }
     }
 
@@ -379,7 +394,7 @@ public class Consume extends IggyConnection implements RunnableTask<Consume.Outp
     public static class IggyMessageOutput implements io.kestra.core.models.tasks.Output {
         @Schema(
             title = "Message payload",
-            description = "Payload of the consumed message as a UTF-8 string."
+            description = "Payload of the consumed message as a UTF-8 string. Designed for text and JSON payloads; arbitrary binary payloads are not supported."
         )
         private final String payload;
 

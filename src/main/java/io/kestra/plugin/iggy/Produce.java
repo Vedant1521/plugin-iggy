@@ -41,7 +41,7 @@ import static io.kestra.core.utils.Rethrow.throwFunction;
 @NoArgsConstructor
 @Schema(
     title = "Publish messages to Apache Iggy stream and topic",
-    description = "Publishes one or more messages to an Apache Iggy stream and topic using data provided via `from`. Supports lists, maps, or storage files."
+    description = "Publishes one or more messages to an Apache Iggy stream and topic using data provided via `from`. Designed for UTF-8 text and JSON payloads; arbitrary binary payloads are not supported. Missing streams and topics are not created automatically unless `createIfMissing: true` is configured."
 )
 @Plugin(
     examples = {
@@ -60,6 +60,7 @@ import static io.kestra.core.utils.Rethrow.throwFunction;
                     password: "{{ secret('IGGY_PASSWORD') }}"
                     stream: orders
                     topic: created
+                    createIfMissing: true
                     from:
                       - payload: '{"orderId": 1, "total": 42.5}'
                       - payload: '{"orderId": 2, "total": 13.0}'
@@ -80,6 +81,7 @@ import static io.kestra.core.utils.Rethrow.throwFunction;
                     password: "{{ secret('IGGY_PASSWORD') }}"
                     stream: orders
                     topic: created
+                    createIfMissing: true
                     from: "{{ outputs.some_task_with_output_file.uri }}"
                 """
         )
@@ -118,6 +120,14 @@ public class Produce extends IggyConnection implements RunnableTask<Produce.Outp
     @PluginProperty(group = "main", internalStorageURI = true)
     private Object from;
 
+    @Schema(
+        title = "Create missing stream and topic",
+        description = "Whether to automatically create the missing stream and topic if they do not exist. Defaults to false."
+    )
+    @Builder.Default
+    @PluginProperty(group = "advanced")
+    private Property<Boolean> createIfMissing = Property.ofValue(false);
+
     @Override
     public Output run(RunContext runContext) throws Exception {
         IggyBaseClient client = createClient(runContext);
@@ -128,7 +138,10 @@ public class Produce extends IggyConnection implements RunnableTask<Produce.Outp
             StreamId streamId = resolveStreamId(streamStr);
             TopicId topicId = resolveTopicId(topicStr);
 
-            ensureStreamAndTopic(runContext, client, streamId, streamStr, topicId, topicStr);
+            boolean rCreateIfMissing = this.createIfMissing != null &&
+                runContext.render(this.createIfMissing).as(Boolean.class).orElse(false);
+
+            ensureStreamAndTopic(runContext, client, streamId, streamStr, topicId, topicStr, rCreateIfMissing);
 
             Partitioning partitioning = this.partitionId != null ?
                 Partitioning.partitionId(runContext.render(this.partitionId).as(Long.class).orElseThrow()) :
@@ -149,37 +162,59 @@ public class Produce extends IggyConnection implements RunnableTask<Produce.Outp
                 .messagesCount(messagesCount)
                 .build();
         } finally {
-            closeClient(client);
+            closeClient(client, runContext.logger());
         }
     }
 
-    private void ensureStreamAndTopic(RunContext runContext, IggyBaseClient client, StreamId streamId, String streamStr, TopicId topicId, String topicStr) {
+    private void ensureStreamAndTopic(RunContext runContext, IggyBaseClient client, StreamId streamId, String streamStr, TopicId topicId, String topicStr, boolean createIfMissing) {
+        boolean streamExists;
         try {
-            if (client.streams().getStream(streamId).isEmpty()) {
-                try {
-                    client.streams().createStream(streamStr);
-                } catch (Exception e) {
-                    runContext.logger().debug("Could not auto-create stream '{}': {}", streamStr, e.getMessage());
-                }
-            }
+            streamExists = client.streams().getStream(streamId).isPresent();
         } catch (Exception e) {
-            runContext.logger().debug("Could not inspect stream '{}': {}", streamStr, e.getMessage());
+            runContext.logger().error("Error inspecting stream '{}': {}", streamStr, e.getMessage());
+            throw new RuntimeException("Failed to verify existence of stream '" + streamStr + "': " + e.getMessage(), e);
         }
 
-        try {
-            if (client.topics().getTopic(streamId, topicId).isEmpty()) {
-                try {
-                    client.topics().createTopic(streamId, 1L, CompressionAlgorithm.None, BigInteger.ZERO, BigInteger.ZERO, Optional.empty(), topicStr);
-                } catch (Exception e) {
-                    runContext.logger().debug("Could not auto-create topic '{}': {}", topicStr, e.getMessage());
-                }
+        if (!streamExists) {
+            if (!createIfMissing) {
+                throw new IllegalArgumentException(
+                    "Stream '" + streamStr + "' does not exist. Please provision it beforehand or configure 'createIfMissing: true'."
+                );
             }
+            try {
+                runContext.logger().info("Stream '{}' does not exist; creating stream...", streamStr);
+                client.streams().createStream(streamStr);
+            } catch (Exception e) {
+                runContext.logger().error("Failed to auto-create stream '{}': {}", streamStr, e.getMessage());
+                throw new RuntimeException("Failed to create missing stream '" + streamStr + "': " + e.getMessage(), e);
+            }
+        }
+
+        boolean topicExists;
+        try {
+            topicExists = client.topics().getTopic(streamId, topicId).isPresent();
         } catch (Exception e) {
-            runContext.logger().debug("Could not inspect topic '{}': {}", topicStr, e.getMessage());
+            runContext.logger().error("Error inspecting topic '{}' in stream '{}': {}", topicStr, streamStr, e.getMessage());
+            throw new RuntimeException("Failed to verify existence of topic '" + topicStr + "' in stream '" + streamStr + "': " + e.getMessage(), e);
+        }
+
+        if (!topicExists) {
+            if (!createIfMissing) {
+                throw new IllegalArgumentException(
+                    "Topic '" + topicStr + "' does not exist in stream '" + streamStr + "'. Please provision it beforehand or configure 'createIfMissing: true'."
+                );
+            }
+            try {
+                runContext.logger().info("Topic '{}' does not exist in stream '{}'; creating topic...", topicStr, streamStr);
+                client.topics().createTopic(streamId, 1L, CompressionAlgorithm.None, BigInteger.ZERO, BigInteger.ZERO, Optional.empty(), topicStr);
+            } catch (Exception e) {
+                runContext.logger().error("Failed to auto-create topic '{}' in stream '{}': {}", topicStr, streamStr, e.getMessage());
+                throw new RuntimeException("Failed to create missing topic '" + topicStr + "' in stream '" + streamStr + "': " + e.getMessage(), e);
+            }
         }
     }
 
-    private Message toMessage(Object object) throws Exception {
+    Message toMessage(Object object) throws Exception {
         if (object instanceof Map<?, ?> map) {
             Object payloadObj = map.get("payload");
             if (payloadObj == null) {
@@ -213,7 +248,7 @@ public class Produce extends IggyConnection implements RunnableTask<Produce.Outp
                 }
             }
 
-            return Message.of(payloadStr, headers.isEmpty() ? null : headers);
+            return headers.isEmpty() ? Message.of(payloadStr) : Message.of(payloadStr, headers);
         } else if (object instanceof String str) {
             return Message.of(str);
         } else if (object instanceof byte[] bytes) {

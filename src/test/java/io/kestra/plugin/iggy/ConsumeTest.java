@@ -45,8 +45,8 @@ class ConsumeTest extends IggyTest {
             .autoCommit(Property.ofValue(true))
             .maxRecords(Property.ofValue(50))
             .maxDuration(Property.ofValue(Duration.ofSeconds(10)))
-            .pollDuration(Property.ofValue(Duration.ofMillis(500)))
-            .batchSize(25)
+            .pollDuration(Property.ofValue(Duration.ofMillis(800)))
+            .batchSize(Property.ofValue(25))
             .build();
 
         assertThat(runContext.render(consume.getHost()).as(String.class).orElse(null), is("localhost"));
@@ -59,7 +59,31 @@ class ConsumeTest extends IggyTest {
         assertThat(runContext.render(consume.getAutoCommit()).as(Boolean.class).orElse(null), is(true));
         assertThat(runContext.render(consume.getMaxRecords()).as(Integer.class).orElse(null), is(50));
         assertThat(runContext.render(consume.getMaxDuration()).as(Duration.class).orElse(null), is(Duration.ofSeconds(10)));
-        assertThat(consume.getBatchSize(), is(25));
+        assertThat(runContext.render(consume.getPollDuration()).as(Duration.class).orElse(null), is(Duration.ofMillis(800)));
+        assertThat(runContext.render(consume.getBatchSize()).as(Integer.class).orElse(null), is(25));
+
+        Consume defaultConsume = Consume.builder()
+            .host(Property.ofValue("localhost"))
+            .stream(Property.ofValue("s"))
+            .topic(Property.ofValue("t"))
+            .build();
+        assertThat(runContext.render(defaultConsume.getBatchSize()).as(Integer.class).orElse(null), is(50));
+    }
+
+    @Test
+    void testInvalidBatchSize() {
+        RunContext runContext = runContextFactory.of();
+        Consume consume = Consume.builder()
+            .host(Property.ofValue("localhost"))
+            .stream(Property.ofValue("s"))
+            .topic(Property.ofValue("t"))
+            .batchSize(Property.ofValue(0))
+            .build();
+
+        org.junit.jupiter.api.Assertions.assertThrows(
+            IllegalArgumentException.class,
+            () -> consume.run(runContext)
+        );
     }
 
     @Test
@@ -96,6 +120,7 @@ class ConsumeTest extends IggyTest {
             .password(Property.ofValue(DEFAULT_PASSWORD))
             .stream(Property.ofValue(streamName))
             .topic(Property.ofValue(topicName))
+            .createIfMissing(Property.ofValue(true))
             .from(Map.of("payload", "hello-consume-integration"))
             .build()
             .run(runContext);

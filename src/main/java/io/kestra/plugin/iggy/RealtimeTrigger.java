@@ -13,6 +13,7 @@ import io.kestra.core.models.triggers.TriggerOutput;
 import io.kestra.core.models.triggers.TriggerService;
 import io.kestra.core.runners.RunContext;
 import io.swagger.v3.oas.annotations.media.Schema;
+import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.NotNull;
 import lombok.AccessLevel;
 import lombok.Builder;
@@ -33,6 +34,7 @@ import org.apache.iggy.message.PollingKind;
 import org.apache.iggy.message.PollingStrategy;
 import org.reactivestreams.Publisher;
 import reactor.core.publisher.Flux;
+import reactor.core.publisher.FluxSink;
 
 import java.math.BigInteger;
 import java.nio.charset.StandardCharsets;
@@ -53,7 +55,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
 @NoArgsConstructor
 @Schema(
     title = "Trigger on real-time Apache Iggy messages",
-    description = "Reacts to Apache Iggy messages in real-time by creating one execution per message as soon as it arrives on the stream and topic."
+    description = "Reacts to Apache Iggy messages in real-time by creating one execution per message as soon as it arrives on the stream and topic. Designed for UTF-8 text and JSON payloads; arbitrary binary payloads are not supported. Consumer offsets are committed after the message is emitted downstream when autoCommit is enabled."
 )
 @Plugin(
     examples = {
@@ -186,7 +188,7 @@ public class RealtimeTrigger extends AbstractTrigger implements RealtimeTriggerI
 
     @Schema(
         title = "Auto-commit offsets",
-        description = "Whether to automatically commit consumer offsets upon polling. Defaults to true."
+        description = "Whether to automatically commit consumer offsets after successfully emitting each message downstream. Defaults to true."
     )
     @Builder.Default
     @PluginProperty(group = "execution")
@@ -206,7 +208,8 @@ public class RealtimeTrigger extends AbstractTrigger implements RealtimeTriggerI
     )
     @Builder.Default
     @PluginProperty(group = "advanced")
-    private Integer batchSize = 10;
+    @Min(1)
+    private Property<Integer> batchSize = Property.ofValue(10);
 
     @Builder.Default
     @Getter(AccessLevel.NONE)
@@ -225,6 +228,8 @@ public class RealtimeTrigger extends AbstractTrigger implements RealtimeTriggerI
 
     public Publisher<Output> publisher(final RunContext runContext) throws Exception {
         return Flux.create(emitter -> {
+            emitter.onDispose(() -> stop(false));
+
             IggyBaseClient client = null;
             try {
                 client = IggyConnection.createClient(this, runContext);
@@ -268,31 +273,65 @@ public class RealtimeTrigger extends AbstractTrigger implements RealtimeTriggerI
                     runContext.render(this.pollDuration).as(Duration.class).orElse(Duration.ofMillis(100)) :
                     Duration.ofMillis(100);
 
-                int fetchBatch = batchSize != null ? batchSize : 10;
+                int rBatchSize = this.batchSize != null ?
+                    runContext.render(this.batchSize).as(Integer.class).orElse(10) : 10;
+                if (rBatchSize < 1) {
+                    throw new IllegalArgumentException("batchSize must be greater than or equal to 1, but got: " + rBatchSize);
+                }
 
-                while (isActive.get()) {
+                while (isActive.get() && !emitter.isCancelled()) {
+                    if (emitter.requestedFromDownstream() <= 0) {
+                        long remainingMillis = pollWait != null ? Math.max(pollWait.toMillis(), 10) : 100;
+                        while (remainingMillis > 0 && isActive.get() && !emitter.isCancelled() && emitter.requestedFromDownstream() <= 0) {
+                            long sleepTime = Math.min(remainingMillis, 50);
+                            try {
+                                Thread.sleep(sleepTime);
+                            } catch (InterruptedException e) {
+                                isActive.set(false);
+                                Thread.currentThread().interrupt();
+                                break;
+                            }
+                            remainingMillis -= sleepTime;
+                        }
+                        continue;
+                    }
+
+                    // Poll messages with autoCommit = false to avoid prematurely committing offsets before emission
                     PolledMessages polled = client.messages().pollMessages(
-                        streamId, topicId, partId, consumer, pollingStrategy, (long) fetchBatch, commit
+                        streamId, topicId, partId, consumer, pollingStrategy, (long) rBatchSize, false
                     );
 
                     List<Message> messages = (polled != null && polled.messages() != null) ?
                         polled.messages() : Collections.emptyList();
 
                     if (messages.isEmpty()) {
-                        try {
-                            Thread.sleep(Math.min(pollWait.toMillis(), 500));
-                        } catch (InterruptedException e) {
-                            isActive.set(false);
-                            Thread.currentThread().interrupt();
-                            break;
+                        if (pollWait != null && !pollWait.isNegative() && !pollWait.isZero()) {
+                            long remainingMillis = pollWait.toMillis();
+                            while (remainingMillis > 0 && isActive.get() && !emitter.isCancelled()) {
+                                long sleepTime = Math.min(remainingMillis, 50);
+                                try {
+                                    Thread.sleep(sleepTime);
+                                } catch (InterruptedException e) {
+                                    isActive.set(false);
+                                    Thread.currentThread().interrupt();
+                                    break;
+                                }
+                                remainingMillis -= sleepTime;
+                            }
                         }
                     } else {
                         for (Message message : messages) {
-                            if (!isActive.get()) {
+                            if (!isActive.get() || emitter.isCancelled()) {
                                 break;
                             }
                             Output output = toOutput(message, streamStr, topicStr, partId);
                             emitter.next(output);
+
+                            if (commit && message.header() != null && message.header().offset() != null) {
+                                client.consumerOffsets().storeConsumerOffset(
+                                    streamId, topicId, partId, consumer, message.header().offset()
+                                );
+                            }
                         }
                     }
 
@@ -305,10 +344,10 @@ public class RealtimeTrigger extends AbstractTrigger implements RealtimeTriggerI
             } catch (Throwable throwable) {
                 emitter.error(throwable);
             } finally {
-                IggyConnection.closeClient(client);
+                IggyConnection.closeClient(client, runContext.logger());
                 waitForTermination.countDown();
             }
-        });
+        }, FluxSink.OverflowStrategy.BUFFER);
     }
 
     private Output toOutput(Message message, String stream, String topic, Optional<Long> partitionId) {
@@ -374,7 +413,7 @@ public class RealtimeTrigger extends AbstractTrigger implements RealtimeTriggerI
     public static class Output implements io.kestra.core.models.tasks.Output {
         @Schema(
             title = "Message payload",
-            description = "Payload of the consumed message as a UTF-8 string."
+            description = "Payload of the consumed message as a UTF-8 string. Designed for text and JSON payloads; arbitrary binary payloads are not supported."
         )
         private final String payload;
 

@@ -20,6 +20,7 @@ import org.apache.iggy.client.blocking.tcp.IggyTcpClient;
 import org.apache.iggy.client.blocking.tcp.IggyTcpClientBuilder;
 import org.apache.iggy.identifier.StreamId;
 import org.apache.iggy.identifier.TopicId;
+import org.slf4j.Logger;
 
 @SuperBuilder
 @ToString
@@ -137,13 +138,20 @@ public abstract class IggyConnection extends Task implements IggyConnectionInter
         return createClient(this, runContext);
     }
 
-    public static void closeClient(IggyBaseClient client) {
+    public static void closeClient(IggyBaseClient client, Logger logger) {
         if (client instanceof AutoCloseable closeable) {
             try {
                 closeable.close();
-            } catch (Exception ignored) {
+            } catch (Exception e) {
+                if (logger != null) {
+                    logger.warn("Failed to close Apache Iggy client cleanly: {}", e.getMessage(), e);
+                }
             }
         }
+    }
+
+    public static void closeClient(IggyBaseClient client) {
+        closeClient(client, null);
     }
 
     public static StreamId resolveStreamId(String stream) {

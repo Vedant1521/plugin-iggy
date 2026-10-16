@@ -51,7 +51,39 @@ class ProduceTest extends IggyTest {
         assertThat(runContext.render(produce.getStream()).as(String.class).orElse(null), is("stream-1"));
         assertThat(runContext.render(produce.getTopic()).as(String.class).orElse(null), is("topic-1"));
         assertThat(runContext.render(produce.getPartitionId()).as(Long.class).orElse(null), is(1L));
+        assertThat(runContext.render(produce.getCreateIfMissing()).as(Boolean.class).orElse(null), is(false));
         assertThat(produce.getFrom(), notNullValue());
+
+        Produce produceWithCreate = Produce.builder()
+            .host(Property.ofValue("localhost"))
+            .stream(Property.ofValue("stream-1"))
+            .topic(Property.ofValue("topic-1"))
+            .from("data")
+            .createIfMissing(Property.ofValue(true))
+            .build();
+        assertThat(runContext.render(produceWithCreate.getCreateIfMissing()).as(Boolean.class).orElse(null), is(true));
+    }
+
+    @Test
+    void testToMessageUtf8AndJsonEncoding() throws Exception {
+        Produce produce = Produce.builder()
+            .host(Property.ofValue("localhost"))
+            .stream(Property.ofValue("s"))
+            .topic(Property.ofValue("t"))
+            .from("test")
+            .build();
+
+        org.apache.iggy.message.Message textMsg = produce.toMessage("plain text");
+        assertThat(new String(textMsg.payload(), java.nio.charset.StandardCharsets.UTF_8), is("plain text"));
+
+        org.apache.iggy.message.Message unicodeMsg = produce.toMessage("Hello, 世界! 🚀");
+        assertThat(new String(unicodeMsg.payload(), java.nio.charset.StandardCharsets.UTF_8), is("Hello, 世界! 🚀"));
+
+        org.apache.iggy.message.Message jsonMsg = produce.toMessage(Map.of("key", "value", "count", 42));
+        assertThat(new String(jsonMsg.payload(), java.nio.charset.StandardCharsets.UTF_8), containsString("\"key\":\"value\""));
+
+        org.apache.iggy.message.Message mapPayloadMsg = produce.toMessage(Map.of("payload", "explicit-payload", "headers", Map.of("h1", "v1")));
+        assertThat(new String(mapPayloadMsg.payload(), java.nio.charset.StandardCharsets.UTF_8), is("explicit-payload"));
     }
 
     @Test
@@ -67,14 +99,16 @@ class ProduceTest extends IggyTest {
             .password(Property.ofValue(DEFAULT_PASSWORD))
             .stream(Property.ofValue(streamName))
             .topic(Property.ofValue(topicName))
+            .createIfMissing(Property.ofValue(true))
             .from(List.of(
                 Map.of("payload", "message-one", "headers", Map.of("key1", "val1")),
-                Map.of("payload", "message-two")
+                Map.of("payload", "message-two"),
+                Map.of("payload", "message-utf8-🚀-accentué")
             ))
             .build()
             .run(runContext);
 
-        assertThat(produceOutput.getMessagesCount(), is(2));
+        assertThat(produceOutput.getMessagesCount(), is(3));
 
         Consume.Output consumeOutput = Consume.builder()
             .host(Property.ofValue(DEFAULT_HOST))
@@ -84,16 +118,17 @@ class ProduceTest extends IggyTest {
             .stream(Property.ofValue(streamName))
             .topic(Property.ofValue(topicName))
             .consumerId(Property.ofValue("1"))
-            .maxRecords(Property.ofValue(2))
+            .maxRecords(Property.ofValue(3))
             .maxDuration(Property.ofValue(Duration.ofSeconds(5)))
             .build()
             .run(runContext);
 
-        assertThat(consumeOutput.getMessagesCount(), is(2));
+        assertThat(consumeOutput.getMessagesCount(), is(3));
         List<Map<String, Object>> messages = toMessages(consumeOutput);
-        assertThat(messages.size(), is(2));
+        assertThat(messages.size(), is(3));
         assertThat(messages.get(0).get("payload"), is("message-one"));
         assertThat(messages.get(1).get("payload"), is("message-two"));
+        assertThat(messages.get(2).get("payload"), is("message-utf8-🚀-accentué"));
     }
 
     @Test
@@ -127,6 +162,7 @@ class ProduceTest extends IggyTest {
             .password(Property.ofValue(DEFAULT_PASSWORD))
             .stream(Property.ofValue(streamName))
             .topic(Property.ofValue(topicName))
+            .createIfMissing(Property.ofValue(true))
             .from(storageUri.toString())
             .build()
             .run(runContext);

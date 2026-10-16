@@ -73,4 +73,11 @@ public interface ConsumeInterface {
     )
     @PluginProperty(group = "execution")
     Property<Duration> getPollDuration();
+
+    @Schema(
+        title = "Batch size",
+        description = "Maximum messages fetched per poll. Defaults to 50."
+    )
+    @PluginProperty(group = "advanced")
+    Property<Integer> getBatchSize();
 }

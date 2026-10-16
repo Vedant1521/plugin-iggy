@@ -45,6 +45,7 @@ class TriggerTest extends IggyTest {
                 .password(Property.ofValue(DEFAULT_PASSWORD))
                 .stream(Property.ofValue("test-stream"))
                 .topic(Property.ofValue("test-topic"))
+                .createIfMissing(Property.ofValue(true))
                 .from(Map.of("payload", "hello from trigger flow"))
                 .build()
                 .run(runContextFactory.of());
@@ -67,7 +68,7 @@ class TriggerTest extends IggyTest {
             .strategy(Property.ofValue(PollingKind.Next))
             .offset(Property.ofValue(BigInteger.ONE))
             .maxRecords(Property.ofValue(10))
-            .batchSize(20)
+            .batchSize(Property.ofValue(20))
             .build();
 
         assertThat(runContext.render(trigger.getHost()).as(String.class).orElse(null), is("localhost"));
@@ -77,8 +78,17 @@ class TriggerTest extends IggyTest {
         assertThat(runContext.render(trigger.getStrategy()).as(PollingKind.class).orElse(null), is(PollingKind.Next));
         assertThat(runContext.render(trigger.getOffset()).as(BigInteger.class).orElse(null), is(BigInteger.ONE));
         assertThat(runContext.render(trigger.getMaxRecords()).as(Integer.class).orElse(null), is(10));
-        assertThat(trigger.getBatchSize(), is(20));
+        assertThat(runContext.render(trigger.getBatchSize()).as(Integer.class).orElse(null), is(20));
         assertThat(trigger.getInterval(), is(Duration.ofSeconds(60)));
+
+        Trigger defaultTrigger = Trigger.builder()
+            .id("default")
+            .type(Trigger.class.getName())
+            .host(Property.ofValue("localhost"))
+            .stream(Property.ofValue("s"))
+            .topic(Property.ofValue("t"))
+            .build();
+        assertThat(runContext.render(defaultTrigger.getBatchSize()).as(Integer.class).orElse(null), is(50));
     }
 
     @Test

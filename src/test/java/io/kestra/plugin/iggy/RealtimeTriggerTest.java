@@ -55,8 +55,8 @@ class RealtimeTriggerTest extends IggyTest {
             .topic(Property.ofExpression("{{ topicKey }}"))
             .consumerId(Property.ofValue("c-group"))
             .strategy(Property.ofValue(PollingKind.Next))
-            .pollDuration(Property.ofValue(Duration.ofMillis(200)))
-            .batchSize(15)
+            .pollDuration(Property.ofValue(Duration.ofMillis(750)))
+            .batchSize(Property.ofValue(15))
             .build();
 
         assertThat(runContext.render(trigger.getHost()).as(String.class).orElse(null), is("localhost"));
@@ -65,8 +65,17 @@ class RealtimeTriggerTest extends IggyTest {
         assertThat(runContext.render(trigger.getTopic()).as(String.class).orElse(null), is("realtime-topic"));
         assertThat(runContext.render(trigger.getConsumerId()).as(String.class).orElse(null), is("c-group"));
         assertThat(runContext.render(trigger.getStrategy()).as(PollingKind.class).orElse(null), is(PollingKind.Next));
-        assertThat(runContext.render(trigger.getPollDuration()).as(Duration.class).orElse(null), is(Duration.ofMillis(200)));
-        assertThat(trigger.getBatchSize(), is(15));
+        assertThat(runContext.render(trigger.getPollDuration()).as(Duration.class).orElse(null), is(Duration.ofMillis(750)));
+        assertThat(runContext.render(trigger.getBatchSize()).as(Integer.class).orElse(null), is(15));
+
+        RealtimeTrigger defaultTrigger = RealtimeTrigger.builder()
+            .id("default")
+            .type(RealtimeTrigger.class.getName())
+            .host(Property.ofValue("localhost"))
+            .stream(Property.ofValue("s"))
+            .topic(Property.ofValue("t"))
+            .build();
+        assertThat(runContext.render(defaultTrigger.getBatchSize()).as(Integer.class).orElse(null), is(10));
     }
 
     @Test
@@ -109,6 +118,7 @@ class RealtimeTriggerTest extends IggyTest {
             .password(Property.ofValue(DEFAULT_PASSWORD))
             .stream(Property.ofValue("test-stream-realtime"))
             .topic(Property.ofValue("test-topic-realtime"))
+            .createIfMissing(Property.ofValue(true))
             .from(Map.of("payload", "hello realtime trigger"))
             .build()
             .run(runContextFactory.of());
@@ -135,5 +145,30 @@ class RealtimeTriggerTest extends IggyTest {
         // Must safely execute without throwing
         trigger.stop();
         trigger.kill();
+    }
+
+    @Test
+    void testRealtimeTriggerCancellation() throws Exception {
+        RunContext runContext = runContextFactory.of();
+        RealtimeTrigger trigger = RealtimeTrigger.builder()
+            .id("realtime-cancel-test")
+            .type(RealtimeTrigger.class.getName())
+            .host(Property.ofValue("localhost"))
+            .stream(Property.ofValue("stream"))
+            .topic(Property.ofValue("topic"))
+            .build();
+
+        org.reactivestreams.Publisher<RealtimeTrigger.Output> pub = trigger.publisher(runContext);
+        reactor.core.Disposable disposable = Flux.from(pub).subscribe(msg -> {}, err -> {});
+        disposable.dispose();
+        trigger.stop();
+        trigger.kill();
+    }
+
+    @Test
+    void testCloseClientWithErrorHandling() {
+        org.slf4j.Logger logger = org.slf4j.LoggerFactory.getLogger(RealtimeTriggerTest.class);
+        IggyConnection.closeClient(null, logger);
+        IggyConnection.closeClient(null);
     }
 }

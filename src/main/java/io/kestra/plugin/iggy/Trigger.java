@@ -14,6 +14,7 @@ import io.kestra.core.models.triggers.TriggerOutput;
 import io.kestra.core.models.triggers.TriggerService;
 import io.kestra.core.runners.RunContext;
 import io.swagger.v3.oas.annotations.media.Schema;
+import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.NotNull;
 import lombok.AccessLevel;
 import lombok.Builder;
@@ -204,7 +205,8 @@ public class Trigger extends AbstractTrigger implements PollingTriggerInterface,
     )
     @Builder.Default
     @PluginProperty(group = "advanced")
-    private Integer batchSize = 50;
+    @Min(1)
+    private Property<Integer> batchSize = Property.ofValue(50);
 
     @Builder.Default
     @Schema(
