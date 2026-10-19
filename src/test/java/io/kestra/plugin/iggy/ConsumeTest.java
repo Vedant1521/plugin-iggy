@@ -19,6 +19,7 @@ import java.util.UUID;
 
 import static org.hamcrest.MatcherAssert.assertThat;
 import static org.hamcrest.Matchers.*;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 
 class ConsumeTest extends IggyTest {
     @Inject
@@ -80,7 +81,7 @@ class ConsumeTest extends IggyTest {
             .batchSize(Property.ofValue(0))
             .build();
 
-        org.junit.jupiter.api.Assertions.assertThrows(
+        assertThrows(
             IllegalArgumentException.class,
             () -> consume.run(runContext)
         );

@@ -23,6 +23,7 @@ import java.util.Optional;
 
 import static org.hamcrest.MatcherAssert.assertThat;
 import static org.hamcrest.Matchers.*;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 
 class TriggerTest extends IggyTest {
     @Inject
@@ -134,7 +135,7 @@ class TriggerTest extends IggyTest {
             .autoCommit(Property.ofValue(false))
             .build();
 
-        var ex = org.junit.jupiter.api.Assertions.assertThrows(
+        var ex = assertThrows(
             IllegalArgumentException.class,
             () -> trigger.evaluate(conditionContext, triggerContext)
         );
@@ -156,7 +157,7 @@ class TriggerTest extends IggyTest {
             .strategy(Property.ofValue(PollingKind.First))
             .build();
 
-        var ex = org.junit.jupiter.api.Assertions.assertThrows(
+        var ex = assertThrows(
             IllegalArgumentException.class,
             () -> trigger.evaluate(conditionContext, triggerContext)
         );
