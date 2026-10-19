@@ -84,50 +84,51 @@ public abstract class IggyConnection extends Task implements IggyConnectionInter
     protected Property<Boolean> tls = Property.ofValue(false);
 
     public static IggyBaseClient createClient(IggyConnectionInterface connection, RunContext runContext) throws Exception {
-        String hostStr = runContext.render(connection.getHost()).as(String.class).orElseThrow();
-        TransportType transportType = connection.getTransport() != null ?
+        var rHost = runContext.render(connection.getHost()).as(String.class)
+            .orElseThrow(() -> new IllegalArgumentException("host is required: set it or check the expression"));
+        var rTransport = connection.getTransport() != null ?
             runContext.render(connection.getTransport()).as(TransportType.class).orElse(TransportType.TCP) : TransportType.TCP;
 
-        int defaultPort = transportType == TransportType.HTTP ? 3000 : 8090;
-        int portInt = connection.getPort() != null ?
+        var defaultPort = rTransport == TransportType.HTTP ? 3000 : 8090;
+        var rPort = connection.getPort() != null ?
             runContext.render(connection.getPort()).as(Integer.class).orElse(defaultPort) : defaultPort;
 
-        boolean tlsBool = connection.getTls() != null && runContext.render(connection.getTls()).as(Boolean.class).orElse(false);
+        var rTls = connection.getTls() != null && runContext.render(connection.getTls()).as(Boolean.class).orElse(false);
 
-        String userStr = connection.getUsername() != null ? runContext.render(connection.getUsername()).as(String.class).orElse(null) : null;
-        String passStr = connection.getPassword() != null ? runContext.render(connection.getPassword()).as(String.class).orElse(null) : null;
-        String tokenStr = connection.getToken() != null ? runContext.render(connection.getToken()).as(String.class).orElse(null) : null;
+        var rUser = connection.getUsername() != null ? runContext.render(connection.getUsername()).as(String.class).orElse(null) : null;
+        var rPassword = connection.getPassword() != null ? runContext.render(connection.getPassword()).as(String.class).orElse(null) : null;
+        var rToken = connection.getToken() != null ? runContext.render(connection.getToken()).as(String.class).orElse(null) : null;
 
-        if (transportType == TransportType.TCP) {
-            IggyTcpClientBuilder builder = IggyTcpClient.builder()
-                .host(hostStr)
-                .port(portInt)
-                .tls(tlsBool);
+        if (rTransport == TransportType.TCP) {
+            var builder = IggyTcpClient.builder()
+                .host(rHost)
+                .port(rPort)
+                .tls(rTls);
 
-            if (userStr != null && passStr != null) {
-                builder.credentials(userStr, passStr);
+            if (rUser != null && rPassword != null) {
+                builder.credentials(rUser, rPassword);
                 return builder.buildAndLogin();
             } else {
-                IggyTcpClient client = builder.build();
+                var client = builder.build();
                 client.connect();
-                if (tokenStr != null) {
-                    client.personalAccessTokens().loginWithPersonalAccessToken(tokenStr);
+                if (rToken != null) {
+                    client.personalAccessTokens().loginWithPersonalAccessToken(rToken);
                 }
                 return client;
             }
         } else {
-            IggyHttpClientBuilder builder = IggyHttpClient.builder()
-                .host(hostStr)
-                .port(portInt)
-                .tls(tlsBool);
+            var builder = IggyHttpClient.builder()
+                .host(rHost)
+                .port(rPort)
+                .tls(rTls);
 
-            if (userStr != null && passStr != null) {
-                builder.credentials(userStr, passStr);
+            if (rUser != null && rPassword != null) {
+                builder.credentials(rUser, rPassword);
                 return builder.buildAndLogin();
             } else {
-                IggyHttpClient client = builder.build();
-                if (tokenStr != null) {
-                    client.personalAccessTokens().loginWithPersonalAccessToken(tokenStr);
+                var client = builder.build();
+                if (rToken != null) {
+                    client.personalAccessTokens().loginWithPersonalAccessToken(rToken);
                 }
                 return client;
             }

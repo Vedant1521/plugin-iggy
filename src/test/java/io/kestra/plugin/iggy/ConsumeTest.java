@@ -109,6 +109,7 @@ class ConsumeTest extends IggyTest {
 
     @Test
     void testConsumeIntegration() throws Exception {
+        assumeIggyReachable();
         String streamName = "consume-test-" + UUID.randomUUID().toString().substring(0, 8);
         String topicName = "topic-test-" + UUID.randomUUID().toString().substring(0, 8);
         RunContext runContext = runContextFactory.of();

@@ -5,17 +5,13 @@ import io.kestra.core.models.executions.Execution;
 import io.kestra.core.models.property.Property;
 import io.kestra.core.runners.RunContext;
 import io.kestra.core.runners.RunContextFactory;
-import io.kestra.core.serializers.FileSerde;
 import io.kestra.core.storages.StorageInterface;
-import io.kestra.core.tenant.TenantService;
 import jakarta.inject.Inject;
 import org.apache.iggy.message.PollingKind;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.TestInfo;
 
-import java.io.BufferedReader;
-import java.io.InputStreamReader;
 import java.math.BigInteger;
 import java.net.URI;
 import java.time.Duration;
@@ -38,6 +34,7 @@ class TriggerTest extends IggyTest {
     @BeforeEach
     void setUp(TestInfo testInfo) throws Exception {
         if (testInfo.getTestMethod().map(m -> m.isAnnotationPresent(EvaluateTrigger.class)).orElse(false)) {
+            assumeIggyReachable();
             Produce.builder()
                 .host(Property.ofValue(DEFAULT_HOST))
                 .port(Property.ofValue(DEFAULT_PORT))
@@ -94,15 +91,12 @@ class TriggerTest extends IggyTest {
     @Test
     @EvaluateTrigger(flow = "flows/iggy-listen.yml", triggerId = "watch")
     void testTriggerIntegration(Optional<Execution> optionalExecution) throws Exception {
+        assumeIggyReachable();
         assertThat(optionalExecution.isPresent(), is(true));
 
         Execution execution = optionalExecution.get();
 
-        BufferedReader inputStream = new BufferedReader(
-            new InputStreamReader(storageInterface.get(TenantService.MAIN_TENANT, null, URI.create((String) execution.getTrigger().getVariables().get("uri"))))
-        );
-        List<Map<String, Object>> result = new ArrayList<>();
-        FileSerde.reader(inputStream, r -> result.add((Map<String, Object>) r));
+        List<Map<String, Object>> result = toMessages(URI.create((String) execution.getTrigger().getVariables().get("uri")));
 
         assertThat(execution.getTrigger().getVariables().get("messagesCount"), is(1));
         assertThat(result.size(), is(1));

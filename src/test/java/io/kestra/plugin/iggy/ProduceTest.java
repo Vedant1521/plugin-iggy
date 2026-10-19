@@ -88,6 +88,7 @@ class ProduceTest extends IggyTest {
 
     @Test
     void testProduceAndConsumeIntegration() throws Exception {
+        assumeIggyReachable();
         String streamName = "test-stream-" + UUID.randomUUID().toString().substring(0, 8);
         String topicName = "test-topic-" + UUID.randomUUID().toString().substring(0, 8);
         RunContext runContext = runContextFactory.of();
@@ -133,6 +134,7 @@ class ProduceTest extends IggyTest {
 
     @Test
     void testProduceFromInternalStorageIntegration() throws Exception {
+        assumeIggyReachable();
         String streamName = "storage-stream-" + UUID.randomUUID().toString().substring(0, 8);
         String topicName = "storage-topic-" + UUID.randomUUID().toString().substring(0, 8);
         RunContext runContext = runContextFactory.of();

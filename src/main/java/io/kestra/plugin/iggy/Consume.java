@@ -9,7 +9,6 @@ import io.kestra.core.models.tasks.RunnableTask;
 import io.kestra.core.runners.RunContext;
 import io.kestra.core.serializers.FileSerde;
 import io.swagger.v3.oas.annotations.media.Schema;
-import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.NotNull;
 import lombok.AccessLevel;
 import lombok.Builder;
@@ -161,11 +160,10 @@ public class Consume extends IggyConnection implements RunnableTask<Consume.Outp
 
     @Schema(
         title = "Batch size",
-        description = "Maximum messages fetched per poll. Defaults to 50."
+        description = "Maximum messages fetched per poll. Must be greater than or equal to 1. Defaults to 50."
     )
     @Builder.Default
     @PluginProperty(group = "advanced")
-    @Min(1)
     private Property<Integer> batchSize = Property.ofValue(50);
 
     @Getter(AccessLevel.NONE)
@@ -184,52 +182,56 @@ public class Consume extends IggyConnection implements RunnableTask<Consume.Outp
 
     @Override
     public Output run(RunContext runContext) throws Exception {
-        int rBatchSize = this.batchSize != null ?
+        var rBatchSize = this.batchSize != null ?
             runContext.render(this.batchSize).as(Integer.class).orElse(50) : 50;
         if (rBatchSize < 1) {
             throw new IllegalArgumentException("batchSize must be greater than or equal to 1, but got: " + rBatchSize);
         }
 
-        String streamStr = runContext.render(this.stream).as(String.class).orElseThrow();
-        String topicStr = runContext.render(this.topic).as(String.class).orElseThrow();
+        var rStream = runContext.render(this.stream).as(String.class)
+            .orElseThrow(() -> new IllegalArgumentException("stream is required: set it or check the expression"));
+        var rTopic = runContext.render(this.topic).as(String.class)
+            .orElseThrow(() -> new IllegalArgumentException("topic is required: set it or check the expression"));
 
-        StreamId streamId = resolveStreamId(streamStr);
-        TopicId topicId = resolveTopicId(topicStr);
+        var streamId = resolveStreamId(rStream);
+        var topicId = resolveTopicId(rTopic);
 
-        Optional<Long> partId = this.partitionId != null ?
-            Optional.of(runContext.render(this.partitionId).as(Long.class).orElseThrow()) :
-            Optional.empty();
+        var rPartitionId = this.partitionId != null ?
+            Optional.of(runContext.render(this.partitionId).as(Long.class)
+                .orElseThrow(() -> new IllegalArgumentException("partitionId is invalid: check the expression"))) :
+            Optional.<Long>empty();
 
-        String cId = this.consumerId != null ?
+        var rConsumerId = this.consumerId != null ?
             runContext.render(this.consumerId).as(String.class).orElse("1") : "1";
-        Consumer consumer = NumberUtils.isDigits(cId) ?
-            Consumer.of(Long.parseLong(cId)) :
-            Consumer.of(ConsumerId.of(cId));
+        var consumer = NumberUtils.isDigits(rConsumerId) ?
+            Consumer.of(Long.parseLong(rConsumerId)) :
+            Consumer.of(ConsumerId.of(rConsumerId));
 
-        PollingKind kind = this.strategy != null ?
+        var kind = this.strategy != null ?
             runContext.render(this.strategy).as(PollingKind.class).orElse(PollingKind.Next) :
             PollingKind.Next;
 
-        BigInteger offsetVal = this.offset != null ?
+        var rOffset = this.offset != null ?
             runContext.render(this.offset).as(BigInteger.class).orElse(BigInteger.ZERO) :
             BigInteger.ZERO;
 
-        PollingStrategy pollingStrategy = switch (kind) {
+        var pollingStrategy = switch (kind) {
             case First -> PollingStrategy.first();
             case Last -> PollingStrategy.last();
-            case Offset -> PollingStrategy.offset(offsetVal);
-            case Timestamp -> PollingStrategy.timestamp(offsetVal);
+            case Offset -> PollingStrategy.offset(rOffset);
+            case Timestamp -> PollingStrategy.timestamp(rOffset);
             default -> PollingStrategy.next();
         };
 
-        boolean commit = this.autoCommit == null ||
+        var commit = this.autoCommit == null ||
             runContext.render(this.autoCommit).as(Boolean.class).orElse(true);
 
-        IggyBaseClient client = createClient(runContext);
+        BigInteger lastOffset = null;
+        var client = createClient(runContext);
         try {
-            Instant pollStart = Instant.now();
-            int total = 0;
-            File outputFile = runContext.workingDir().createTempFile(".ion").toFile();
+            var pollStart = Instant.now();
+            var total = 0;
+            var outputFile = runContext.workingDir().createTempFile(".ion").toFile();
 
             try (OutputStream output = new BufferedOutputStream(new FileOutputStream(outputFile))) {
                 do {
@@ -237,8 +239,8 @@ public class Consume extends IggyConnection implements RunnableTask<Consume.Outp
                         break;
                     }
 
-                    int currentTotal = total;
-                    int maxRemaining = this.maxRecords != null ?
+                    var currentTotal = total;
+                    var maxRemaining = this.maxRecords != null ?
                         runContext.render(this.maxRecords).as(Integer.class).map(max -> max - currentTotal).orElse(rBatchSize) :
                         rBatchSize;
 
@@ -248,19 +250,19 @@ public class Consume extends IggyConnection implements RunnableTask<Consume.Outp
 
                     long fetchCount = Math.min(rBatchSize, maxRemaining);
                     PolledMessages polled = client.messages().pollMessages(
-                        streamId, topicId, partId, consumer, pollingStrategy, fetchCount, commit
+                        streamId, topicId, rPartitionId, consumer, pollingStrategy, fetchCount, commit
                     );
 
                     List<Message> messages = polled != null && polled.messages() != null ?
                         polled.messages() : Collections.emptyList();
 
                     if (messages.isEmpty()) {
-                        Duration waitDur = this.pollDuration != null ?
+                        var rPollDuration = this.pollDuration != null ?
                             runContext.render(this.pollDuration).as(Duration.class).orElse(Duration.ofSeconds(1)) :
                             Duration.ofSeconds(1);
 
-                        if (waitDur != null && !waitDur.isNegative() && !waitDur.isZero()) {
-                            long remainingMillis = waitDur.toMillis();
+                        if (rPollDuration != null && !rPollDuration.isNegative() && !rPollDuration.isZero()) {
+                            long remainingMillis = rPollDuration.toMillis();
                             while (remainingMillis > 0 && isActive.get()) {
                                 long sleepTime = Math.min(remainingMillis, 100);
                                 try {
@@ -274,7 +276,6 @@ public class Consume extends IggyConnection implements RunnableTask<Consume.Outp
                             }
                         }
 
-                        // If empty, check whether we should break or continue if maxDuration allows
                         if (maxDuration == null) {
                             break;
                         }
@@ -291,6 +292,13 @@ public class Consume extends IggyConnection implements RunnableTask<Consume.Outp
                         Map<String, Object> map = toMessageMap(message);
                         FileSerde.write(output, map);
                         total++;
+                        if (message.header() != null && message.header().offset() != null) {
+                            lastOffset = message.header().offset();
+                        }
+                    }
+
+                    if (lastOffset != null && (!commit || kind != PollingKind.Next)) {
+                        pollingStrategy = PollingStrategy.offset(lastOffset.add(BigInteger.ONE));
                     }
                 } while (isActive.get() && !isEnded(total, pollStart, runContext));
             } finally {

@@ -75,7 +75,7 @@ class RealtimeTriggerTest extends IggyTest {
             .stream(Property.ofValue("s"))
             .topic(Property.ofValue("t"))
             .build();
-        assertThat(runContext.render(defaultTrigger.getBatchSize()).as(Integer.class).orElse(null), is(10));
+        assertThat(runContext.render(defaultTrigger.getBatchSize()).as(Integer.class).orElse(null), is(50));
     }
 
     @Test
@@ -103,6 +103,7 @@ class RealtimeTriggerTest extends IggyTest {
 
     @Test
     void testRealtimeTriggerIntegration() throws Exception {
+        assumeIggyReachable();
         CountDownLatch queueCount = new CountDownLatch(1);
         Flux<Execution> receive = TestsUtils.receive(executionQueue, execution -> {
             queueCount.countDown();

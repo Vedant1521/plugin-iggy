@@ -1,20 +1,18 @@
 package io.kestra.plugin.iggy;
 
+import com.fasterxml.jackson.annotation.JsonIgnore;
 import io.kestra.core.models.annotations.Example;
 import io.kestra.core.models.annotations.Plugin;
 import io.kestra.core.models.annotations.PluginProperty;
 import io.kestra.core.models.conditions.ConditionContext;
 import io.kestra.core.models.executions.Execution;
 import io.kestra.core.models.property.Property;
-import io.kestra.core.models.triggers.AbstractTrigger;
 import io.kestra.core.models.triggers.RealtimeTriggerInterface;
 import io.kestra.core.models.triggers.TriggerContext;
 import io.kestra.core.models.triggers.TriggerOutput;
 import io.kestra.core.models.triggers.TriggerService;
 import io.kestra.core.runners.RunContext;
 import io.swagger.v3.oas.annotations.media.Schema;
-import jakarta.validation.constraints.Min;
-import jakarta.validation.constraints.NotNull;
 import lombok.AccessLevel;
 import lombok.Builder;
 import lombok.EqualsAndHashCode;
@@ -84,140 +82,18 @@ import java.util.concurrent.atomic.AtomicBoolean;
         )
     }
 )
-public class RealtimeTrigger extends AbstractTrigger implements RealtimeTriggerInterface, TriggerOutput<RealtimeTrigger.Output>, IggyConnectionInterface {
-    @NotNull
-    @Schema(
-        title = "Server host",
-        description = "Hostname or IP address of the Apache Iggy server."
-    )
-    @PluginProperty(group = "connection")
-    private Property<String> host;
-
-    @Schema(
-        title = "Server port",
-        description = "Port of the Apache Iggy server. Defaults to 8090 for TCP and 3000 for HTTP."
-    )
-    @Builder.Default
-    @PluginProperty(group = "connection")
-    private Property<Integer> port = Property.ofValue(8090);
-
-    @Schema(
-        title = "Transport protocol",
-        description = "Transport protocol to use: TCP (default) or HTTP."
-    )
-    @Builder.Default
-    @PluginProperty(group = "connection")
-    private Property<TransportType> transport = Property.ofValue(TransportType.TCP);
-
-    @Schema(
-        title = "Authentication username",
-        description = "Username for authentication."
-    )
-    @PluginProperty(group = "connection")
-    private Property<String> username;
-
+public class RealtimeTrigger extends AbstractIggyTrigger implements RealtimeTriggerInterface, TriggerOutput<RealtimeTrigger.Output> {
+    @JsonIgnore
     @ToString.Exclude
-    @Schema(
-        title = "Authentication password",
-        description = "Password for authentication."
-    )
-    @PluginProperty(secret = true, group = "connection")
-    private Property<String> password;
+    @EqualsAndHashCode.Exclude
+    @Getter(AccessLevel.NONE)
+    private final transient AtomicBoolean isActive = new AtomicBoolean(true);
 
+    @JsonIgnore
     @ToString.Exclude
-    @Schema(
-        title = "Personal access token",
-        description = "Personal access token (PAT) for token-based authentication."
-    )
-    @PluginProperty(secret = true, group = "connection")
-    private Property<String> token;
-
-    @Schema(
-        title = "Use TLS",
-        description = "Whether to enable TLS encryption for the connection. Defaults to false."
-    )
-    @Builder.Default
-    @PluginProperty(group = "connection")
-    private Property<Boolean> tls = Property.ofValue(false);
-
-    @NotNull
-    @Schema(
-        title = "Stream identifier or name",
-        description = "Name or ID of the Apache Iggy stream to consume messages from."
-    )
-    @PluginProperty(group = "main")
-    private Property<String> stream;
-
-    @NotNull
-    @Schema(
-        title = "Topic identifier or name",
-        description = "Name or ID of the Apache Iggy topic to consume messages from."
-    )
-    @PluginProperty(group = "main")
-    private Property<String> topic;
-
-    @Schema(
-        title = "Partition ID",
-        description = "Optional partition ID to consume from."
-    )
-    @PluginProperty(group = "main")
-    private Property<Long> partitionId;
-
-    @Schema(
-        title = "Consumer ID or Name",
-        description = "Identifier of the consumer used to track offsets. Defaults to '1'."
-    )
-    @Builder.Default
-    @PluginProperty(group = "main")
-    private Property<String> consumerId = Property.ofValue("1");
-
-    @Schema(
-        title = "Polling strategy kind",
-        description = "Polling strategy: Offset, Timestamp, First, Last, or Next. Defaults to Next."
-    )
-    @Builder.Default
-    @PluginProperty(group = "execution")
-    private Property<PollingKind> strategy = Property.ofValue(PollingKind.Next);
-
-    @Schema(
-        title = "Offset value",
-        description = "Offset or timestamp value to use when strategy is Offset or Timestamp."
-    )
-    @PluginProperty(group = "execution")
-    private Property<BigInteger> offset;
-
-    @Schema(
-        title = "Auto-commit offsets",
-        description = "Whether to automatically commit consumer offsets after successfully emitting each message downstream. Defaults to true."
-    )
-    @Builder.Default
-    @PluginProperty(group = "execution")
-    private Property<Boolean> autoCommit = Property.ofValue(true);
-
-    @Schema(
-        title = "Poll wait duration",
-        description = "Wait duration between empty poll attempts. Defaults to PT0.1S (100ms)."
-    )
-    @Builder.Default
-    @PluginProperty(group = "execution")
-    private Property<Duration> pollDuration = Property.ofValue(Duration.ofMillis(100));
-
-    @Schema(
-        title = "Batch size",
-        description = "Maximum messages fetched per poll cycle. Defaults to 10."
-    )
-    @Builder.Default
-    @PluginProperty(group = "advanced")
-    @Min(1)
-    private Property<Integer> batchSize = Property.ofValue(10);
-
-    @Builder.Default
+    @EqualsAndHashCode.Exclude
     @Getter(AccessLevel.NONE)
-    private final AtomicBoolean isActive = new AtomicBoolean(true);
-
-    @Builder.Default
-    @Getter(AccessLevel.NONE)
-    private final CountDownLatch waitForTermination = new CountDownLatch(1);
+    private final transient CountDownLatch waitForTermination = new CountDownLatch(1);
 
     @Override
     public Publisher<Execution> evaluate(ConditionContext conditionContext, TriggerContext context) throws Exception {
@@ -234,54 +110,60 @@ public class RealtimeTrigger extends AbstractTrigger implements RealtimeTriggerI
             try {
                 client = IggyConnection.createClient(this, runContext);
 
-                String streamStr = runContext.render(this.stream).as(String.class).orElseThrow();
-                String topicStr = runContext.render(this.topic).as(String.class).orElseThrow();
+                var rStream = runContext.render(this.stream).as(String.class)
+                    .orElseThrow(() -> new IllegalArgumentException("stream is required: set it or check the expression"));
+                var rTopic = runContext.render(this.topic).as(String.class)
+                    .orElseThrow(() -> new IllegalArgumentException("topic is required: set it or check the expression"));
 
-                StreamId streamId = IggyConnection.resolveStreamId(streamStr);
-                TopicId topicId = IggyConnection.resolveTopicId(topicStr);
+                var streamId = IggyConnection.resolveStreamId(rStream);
+                var topicId = IggyConnection.resolveTopicId(rTopic);
 
-                Optional<Long> partId = this.partitionId != null ?
-                    Optional.of(runContext.render(this.partitionId).as(Long.class).orElseThrow()) :
-                    Optional.empty();
+                var rPartitionId = this.partitionId != null ?
+                    Optional.of(runContext.render(this.partitionId).as(Long.class)
+                        .orElseThrow(() -> new IllegalArgumentException("partitionId is invalid: check the expression"))) :
+                    Optional.<Long>empty();
 
-                String cId = this.consumerId != null ?
+                var rConsumerId = this.consumerId != null ?
                     runContext.render(this.consumerId).as(String.class).orElse("1") : "1";
-                Consumer consumer = NumberUtils.isDigits(cId) ?
-                    Consumer.of(Long.parseLong(cId)) :
-                    Consumer.of(ConsumerId.of(cId));
+                var consumer = NumberUtils.isDigits(rConsumerId) ?
+                    Consumer.of(Long.parseLong(rConsumerId)) :
+                    Consumer.of(ConsumerId.of(rConsumerId));
 
-                PollingKind kind = this.strategy != null ?
+                var kind = this.strategy != null ?
                     runContext.render(this.strategy).as(PollingKind.class).orElse(PollingKind.Next) :
                     PollingKind.Next;
 
-                BigInteger offsetVal = this.offset != null ?
+                var rOffset = this.offset != null ?
                     runContext.render(this.offset).as(BigInteger.class).orElse(BigInteger.ZERO) :
                     BigInteger.ZERO;
 
-                PollingStrategy pollingStrategy = switch (kind) {
+                var pollingStrategy = switch (kind) {
                     case First -> PollingStrategy.first();
                     case Last -> PollingStrategy.last();
-                    case Offset -> PollingStrategy.offset(offsetVal);
-                    case Timestamp -> PollingStrategy.timestamp(offsetVal);
+                    case Offset -> PollingStrategy.offset(rOffset);
+                    case Timestamp -> PollingStrategy.timestamp(rOffset);
                     default -> PollingStrategy.next();
                 };
 
-                boolean commit = this.autoCommit == null ||
+                var commit = this.autoCommit == null ||
                     runContext.render(this.autoCommit).as(Boolean.class).orElse(true);
 
-                Duration pollWait = this.pollDuration != null ?
-                    runContext.render(this.pollDuration).as(Duration.class).orElse(Duration.ofMillis(100)) :
-                    Duration.ofMillis(100);
+                var rPollDuration = this.pollDuration != null ?
+                    runContext.render(this.pollDuration).as(Duration.class).orElse(Duration.ofSeconds(1)) :
+                    Duration.ofSeconds(1);
 
-                int rBatchSize = this.batchSize != null ?
-                    runContext.render(this.batchSize).as(Integer.class).orElse(10) : 10;
+                var rBatchSize = this.batchSize != null ?
+                    runContext.render(this.batchSize).as(Integer.class).orElse(50) : 50;
                 if (rBatchSize < 1) {
                     throw new IllegalArgumentException("batchSize must be greater than or equal to 1, but got: " + rBatchSize);
                 }
 
+                BigInteger lastEmittedOffset = null;
+                BigInteger lastStoredOffset = null;
+
                 while (isActive.get() && !emitter.isCancelled()) {
                     if (emitter.requestedFromDownstream() <= 0) {
-                        long remainingMillis = pollWait != null ? Math.max(pollWait.toMillis(), 10) : 100;
+                        long remainingMillis = rPollDuration != null ? Math.max(rPollDuration.toMillis(), 10) : 100;
                         while (remainingMillis > 0 && isActive.get() && !emitter.isCancelled() && emitter.requestedFromDownstream() <= 0) {
                             long sleepTime = Math.min(remainingMillis, 50);
                             try {
@@ -296,17 +178,16 @@ public class RealtimeTrigger extends AbstractTrigger implements RealtimeTriggerI
                         continue;
                     }
 
-                    // Poll messages with autoCommit = false to avoid prematurely committing offsets before emission
                     PolledMessages polled = client.messages().pollMessages(
-                        streamId, topicId, partId, consumer, pollingStrategy, (long) rBatchSize, false
+                        streamId, topicId, rPartitionId, consumer, pollingStrategy, (long) rBatchSize, false
                     );
 
                     List<Message> messages = (polled != null && polled.messages() != null) ?
                         polled.messages() : Collections.emptyList();
 
                     if (messages.isEmpty()) {
-                        if (pollWait != null && !pollWait.isNegative() && !pollWait.isZero()) {
-                            long remainingMillis = pollWait.toMillis();
+                        if (rPollDuration != null && !rPollDuration.isNegative() && !rPollDuration.isZero()) {
+                            long remainingMillis = rPollDuration.toMillis();
                             while (remainingMillis > 0 && isActive.get() && !emitter.isCancelled()) {
                                 long sleepTime = Math.min(remainingMillis, 50);
                                 try {
@@ -320,18 +201,31 @@ public class RealtimeTrigger extends AbstractTrigger implements RealtimeTriggerI
                             }
                         }
                     } else {
-                        for (Message message : messages) {
-                            if (!isActive.get() || emitter.isCancelled()) {
-                                break;
-                            }
-                            Output output = toOutput(message, streamStr, topicStr, partId);
-                            emitter.next(output);
+                        BigInteger batchLastEmittedOffset = null;
+                        try {
+                            for (Message message : messages) {
+                                if (!isActive.get() || emitter.isCancelled()) {
+                                    break;
+                                }
+                                Output output = toOutput(message, rStream, rTopic, rPartitionId);
+                                emitter.next(output);
 
-                            if (commit && message.header() != null && message.header().offset() != null) {
-                                client.consumerOffsets().storeConsumerOffset(
-                                    streamId, topicId, partId, consumer, message.header().offset()
-                                );
+                                if (message.header() != null && message.header().offset() != null) {
+                                    batchLastEmittedOffset = message.header().offset();
+                                    lastEmittedOffset = batchLastEmittedOffset;
+                                }
                             }
+                        } finally {
+                            if (commit && batchLastEmittedOffset != null && !batchLastEmittedOffset.equals(lastStoredOffset)) {
+                                client.consumerOffsets().storeConsumerOffset(
+                                    streamId, topicId, rPartitionId, consumer, batchLastEmittedOffset
+                                );
+                                lastStoredOffset = batchLastEmittedOffset;
+                            }
+                        }
+
+                        if (lastEmittedOffset != null && (!commit || kind != PollingKind.Next)) {
+                            pollingStrategy = PollingStrategy.offset(lastEmittedOffset.add(BigInteger.ONE));
                         }
                     }
 

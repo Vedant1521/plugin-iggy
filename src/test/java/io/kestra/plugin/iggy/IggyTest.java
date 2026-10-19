@@ -5,14 +5,16 @@ import io.kestra.core.serializers.FileSerde;
 import io.kestra.core.storages.StorageInterface;
 import io.kestra.core.tenant.TenantService;
 import jakarta.inject.Inject;
+import org.junit.jupiter.api.Assumptions;
 
-import java.io.BufferedReader;
 import java.io.IOException;
-import java.io.InputStreamReader;
+import java.io.InputStream;
+import java.net.InetSocketAddress;
+import java.net.Socket;
+import java.net.URI;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
-
 import java.util.Optional;
 
 @KestraTest
@@ -34,12 +36,28 @@ public class IggyTest {
         this.storageInterface = storageInterface;
     }
 
-    protected List<Map<String, Object>> toMessages(Consume.Output output) throws IOException {
-        BufferedReader inputStream = new BufferedReader(
-            new InputStreamReader(storageInterface.get(TenantService.MAIN_TENANT, null, output.getUri()))
-        );
+    public static boolean isIggyReachable() {
+        try (Socket socket = new Socket()) {
+            socket.connect(new InetSocketAddress(DEFAULT_HOST, DEFAULT_PORT), 500);
+            return true;
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
+    public static void assumeIggyReachable() {
+        Assumptions.assumeTrue(isIggyReachable(), "Apache Iggy broker is not reachable at " + DEFAULT_HOST + ":" + DEFAULT_PORT + "; skipping integration test");
+    }
+
+    protected List<Map<String, Object>> toMessages(URI uri) throws IOException {
         List<Map<String, Object>> result = new ArrayList<>();
-        FileSerde.reader(inputStream, r -> result.add((Map<String, Object>) r));
+        try (InputStream inputStream = storageInterface.get(TenantService.MAIN_TENANT, null, uri)) {
+            FileSerde.read(inputStream, r -> result.add((Map<String, Object>) r));
+        }
         return result;
+    }
+
+    protected List<Map<String, Object>> toMessages(Consume.Output output) throws IOException {
+        return toMessages(output.getUri());
     }
 }

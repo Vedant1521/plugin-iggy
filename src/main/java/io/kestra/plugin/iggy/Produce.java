@@ -130,28 +130,31 @@ public class Produce extends IggyConnection implements RunnableTask<Produce.Outp
 
     @Override
     public Output run(RunContext runContext) throws Exception {
-        IggyBaseClient client = createClient(runContext);
+        var client = createClient(runContext);
         try {
-            String streamStr = runContext.render(this.stream).as(String.class).orElseThrow();
-            String topicStr = runContext.render(this.topic).as(String.class).orElseThrow();
+            var rStream = runContext.render(this.stream).as(String.class)
+                .orElseThrow(() -> new IllegalArgumentException("stream is required: set it or check the expression"));
+            var rTopic = runContext.render(this.topic).as(String.class)
+                .orElseThrow(() -> new IllegalArgumentException("topic is required: set it or check the expression"));
 
-            StreamId streamId = resolveStreamId(streamStr);
-            TopicId topicId = resolveTopicId(topicStr);
+            var streamId = resolveStreamId(rStream);
+            var topicId = resolveTopicId(rTopic);
 
-            boolean rCreateIfMissing = this.createIfMissing != null &&
+            var rCreateIfMissing = this.createIfMissing != null &&
                 runContext.render(this.createIfMissing).as(Boolean.class).orElse(false);
 
-            ensureStreamAndTopic(runContext, client, streamId, streamStr, topicId, topicStr, rCreateIfMissing);
+            ensureStreamAndTopic(runContext, client, streamId, rStream, topicId, rTopic, rCreateIfMissing);
 
-            Partitioning partitioning = this.partitionId != null ?
-                Partitioning.partitionId(runContext.render(this.partitionId).as(Long.class).orElseThrow()) :
+            var rPartitioning = this.partitionId != null ?
+                Partitioning.partitionId(runContext.render(this.partitionId).as(Long.class)
+                    .orElseThrow(() -> new IllegalArgumentException("partitionId is invalid: check the expression"))) :
                 Partitioning.balanced();
 
-            int messagesCount = Data.from(this.from).read(runContext)
+            var messagesCount = Data.from(this.from).read(runContext)
                 .map(throwFunction(this::toMessage))
                 .buffer(100)
                 .map(throwFunction(batch -> {
-                    client.messages().sendMessages(streamId, topicId, partitioning, batch);
+                    client.messages().sendMessages(streamId, topicId, rPartitioning, batch);
                     return batch.size();
                 }))
                 .reduce(Integer::sum)
