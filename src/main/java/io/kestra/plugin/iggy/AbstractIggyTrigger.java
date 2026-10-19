@@ -125,7 +125,7 @@ public abstract class AbstractIggyTrigger extends AbstractTrigger implements Igg
 
     @Schema(
         title = "Auto-commit offsets",
-        description = "Whether to automatically commit consumer offsets upon polling. Defaults to true."
+        description = "Whether to automatically commit the consumer offset of processed messages. Defaults to true."
     )
     @Builder.Default
     @PluginProperty(group = "execution")

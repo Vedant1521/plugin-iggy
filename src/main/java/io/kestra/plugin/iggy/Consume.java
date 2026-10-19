@@ -18,18 +18,14 @@ import lombok.NoArgsConstructor;
 import lombok.ToString;
 import lombok.experimental.SuperBuilder;
 import org.apache.commons.lang3.math.NumberUtils;
-import org.apache.iggy.client.blocking.IggyBaseClient;
 import org.apache.iggy.consumergroup.Consumer;
 import org.apache.iggy.identifier.ConsumerId;
-import org.apache.iggy.identifier.StreamId;
-import org.apache.iggy.identifier.TopicId;
 import org.apache.iggy.message.Message;
 import org.apache.iggy.message.PolledMessages;
 import org.apache.iggy.message.PollingKind;
 import org.apache.iggy.message.PollingStrategy;
 
 import java.io.BufferedOutputStream;
-import java.io.File;
 import java.io.FileOutputStream;
 import java.io.OutputStream;
 import java.math.BigInteger;
@@ -207,7 +203,7 @@ public class Consume extends IggyConnection implements RunnableTask<Consume.Outp
             Consumer.of(Long.parseLong(rConsumerId)) :
             Consumer.of(ConsumerId.of(rConsumerId));
 
-        var kind = this.strategy != null ?
+        var rStrategy = this.strategy != null ?
             runContext.render(this.strategy).as(PollingKind.class).orElse(PollingKind.Next) :
             PollingKind.Next;
 
@@ -215,7 +211,7 @@ public class Consume extends IggyConnection implements RunnableTask<Consume.Outp
             runContext.render(this.offset).as(BigInteger.class).orElse(BigInteger.ZERO) :
             BigInteger.ZERO;
 
-        var pollingStrategy = switch (kind) {
+        var pollingStrategy = switch (rStrategy) {
             case First -> PollingStrategy.first();
             case Last -> PollingStrategy.last();
             case Offset -> PollingStrategy.offset(rOffset);
@@ -223,7 +219,7 @@ public class Consume extends IggyConnection implements RunnableTask<Consume.Outp
             default -> PollingStrategy.next();
         };
 
-        var commit = this.autoCommit == null ||
+        var rAutoCommit = this.autoCommit == null ||
             runContext.render(this.autoCommit).as(Boolean.class).orElse(true);
 
         BigInteger lastOffset = null;
@@ -250,7 +246,7 @@ public class Consume extends IggyConnection implements RunnableTask<Consume.Outp
 
                     long fetchCount = Math.min(rBatchSize, maxRemaining);
                     PolledMessages polled = client.messages().pollMessages(
-                        streamId, topicId, rPartitionId, consumer, pollingStrategy, fetchCount, commit
+                        streamId, topicId, rPartitionId, consumer, pollingStrategy, fetchCount, rAutoCommit
                     );
 
                     List<Message> messages = polled != null && polled.messages() != null ?
@@ -297,7 +293,7 @@ public class Consume extends IggyConnection implements RunnableTask<Consume.Outp
                         }
                     }
 
-                    if (lastOffset != null && (!commit || kind != PollingKind.Next)) {
+                    if (lastOffset != null && (!rAutoCommit || rStrategy != PollingKind.Next)) {
                         pollingStrategy = PollingStrategy.offset(lastOffset.add(BigInteger.ONE));
                     }
                 } while (isActive.get() && !isEnded(total, pollStart, runContext));

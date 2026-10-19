@@ -11,7 +11,6 @@ import io.kestra.core.models.triggers.PollingTriggerInterface;
 import io.kestra.core.models.triggers.TriggerContext;
 import io.kestra.core.models.triggers.TriggerOutput;
 import io.kestra.core.models.triggers.TriggerService;
-import io.kestra.core.runners.RunContext;
 import io.swagger.v3.oas.annotations.media.Schema;
 import lombok.AccessLevel;
 import lombok.Builder;
@@ -20,7 +19,8 @@ import lombok.Getter;
 import lombok.NoArgsConstructor;
 import lombok.ToString;
 import lombok.experimental.SuperBuilder;
-import org.slf4j.Logger;
+import org.apache.iggy.message.PollingKind;
+
 import java.time.Duration;
 import java.util.Optional;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -33,7 +33,7 @@ import java.util.concurrent.atomic.AtomicReference;
 @NoArgsConstructor
 @Schema(
     title = "Trigger on polled Apache Iggy messages",
-    description = "Polls an Apache Iggy stream and topic on a schedule (default every 60s) and starts one execution per batch."
+    description = "Polls an Apache Iggy stream and topic on a schedule (default every 60s) and starts one execution per batch. Only supports strategy: Next and autoCommit: true to prevent duplicate executions across scheduled evaluations."
 )
 @Plugin(
     examples = {
@@ -103,6 +103,19 @@ public class Trigger extends AbstractIggyTrigger implements PollingTriggerInterf
         if (killedOrStopped.get()) {
             logger.debug("Iggy polling trigger id={} received kill()/stop(); skipping poll", this.id);
             return Optional.empty();
+        }
+
+        var rAutoCommit = this.autoCommit == null ||
+            runContext.render(this.autoCommit).as(Boolean.class).orElse(true);
+        if (!rAutoCommit) {
+            throw new IllegalArgumentException("Trigger only supports autoCommit: true; disable it only on Consume tasks.");
+        }
+
+        var rStrategy = this.strategy != null ?
+            runContext.render(this.strategy).as(PollingKind.class).orElse(PollingKind.Next) :
+            PollingKind.Next;
+        if (rStrategy != PollingKind.Next) {
+            throw new IllegalArgumentException("Trigger only supports strategy: Next; use specific offset strategies on Consume tasks.");
         }
 
         var task = Consume.builder()

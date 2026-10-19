@@ -3,10 +3,8 @@ package io.kestra.plugin.iggy;
 import com.fasterxml.jackson.annotation.JsonIgnore;
 import io.kestra.core.models.annotations.Example;
 import io.kestra.core.models.annotations.Plugin;
-import io.kestra.core.models.annotations.PluginProperty;
 import io.kestra.core.models.conditions.ConditionContext;
 import io.kestra.core.models.executions.Execution;
-import io.kestra.core.models.property.Property;
 import io.kestra.core.models.triggers.RealtimeTriggerInterface;
 import io.kestra.core.models.triggers.TriggerContext;
 import io.kestra.core.models.triggers.TriggerOutput;
@@ -24,8 +22,6 @@ import org.apache.commons.lang3.math.NumberUtils;
 import org.apache.iggy.client.blocking.IggyBaseClient;
 import org.apache.iggy.consumergroup.Consumer;
 import org.apache.iggy.identifier.ConsumerId;
-import org.apache.iggy.identifier.StreamId;
-import org.apache.iggy.identifier.TopicId;
 import org.apache.iggy.message.Message;
 import org.apache.iggy.message.PolledMessages;
 import org.apache.iggy.message.PollingKind;
@@ -129,7 +125,7 @@ public class RealtimeTrigger extends AbstractIggyTrigger implements RealtimeTrig
                     Consumer.of(Long.parseLong(rConsumerId)) :
                     Consumer.of(ConsumerId.of(rConsumerId));
 
-                var kind = this.strategy != null ?
+                var rStrategy = this.strategy != null ?
                     runContext.render(this.strategy).as(PollingKind.class).orElse(PollingKind.Next) :
                     PollingKind.Next;
 
@@ -137,7 +133,7 @@ public class RealtimeTrigger extends AbstractIggyTrigger implements RealtimeTrig
                     runContext.render(this.offset).as(BigInteger.class).orElse(BigInteger.ZERO) :
                     BigInteger.ZERO;
 
-                var pollingStrategy = switch (kind) {
+                var pollingStrategy = switch (rStrategy) {
                     case First -> PollingStrategy.first();
                     case Last -> PollingStrategy.last();
                     case Offset -> PollingStrategy.offset(rOffset);
@@ -145,7 +141,7 @@ public class RealtimeTrigger extends AbstractIggyTrigger implements RealtimeTrig
                     default -> PollingStrategy.next();
                 };
 
-                var commit = this.autoCommit == null ||
+                var rAutoCommit = this.autoCommit == null ||
                     runContext.render(this.autoCommit).as(Boolean.class).orElse(true);
 
                 var rPollDuration = this.pollDuration != null ?
@@ -216,7 +212,7 @@ public class RealtimeTrigger extends AbstractIggyTrigger implements RealtimeTrig
                                 }
                             }
                         } finally {
-                            if (commit && batchLastEmittedOffset != null && !batchLastEmittedOffset.equals(lastStoredOffset)) {
+                            if (rAutoCommit && batchLastEmittedOffset != null && !batchLastEmittedOffset.equals(lastStoredOffset)) {
                                 client.consumerOffsets().storeConsumerOffset(
                                     streamId, topicId, rPartitionId, consumer, batchLastEmittedOffset
                                 );
@@ -224,7 +220,7 @@ public class RealtimeTrigger extends AbstractIggyTrigger implements RealtimeTrig
                             }
                         }
 
-                        if (lastEmittedOffset != null && (!commit || kind != PollingKind.Next)) {
+                        if (lastEmittedOffset != null && (!rAutoCommit || rStrategy != PollingKind.Next)) {
                             pollingStrategy = PollingStrategy.offset(lastEmittedOffset.add(BigInteger.ONE));
                         }
                     }

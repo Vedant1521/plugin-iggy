@@ -1,8 +1,10 @@
 package io.kestra.plugin.iggy;
 
 import io.kestra.core.junit.annotations.EvaluateTrigger;
+import io.kestra.core.models.conditions.ConditionContext;
 import io.kestra.core.models.executions.Execution;
 import io.kestra.core.models.property.Property;
+import io.kestra.core.models.triggers.TriggerContext;
 import io.kestra.core.runners.RunContext;
 import io.kestra.core.runners.RunContextFactory;
 import io.kestra.core.storages.StorageInterface;
@@ -116,5 +118,49 @@ class TriggerTest extends IggyTest {
         // Must safely execute without throwing
         trigger.stop();
         trigger.kill();
+    }
+
+    @Test
+    void testTriggerRejectsAutoCommitFalse() {
+        var runContext = runContextFactory.of();
+        var conditionContext = ConditionContext.builder().runContext(runContext).build();
+        var triggerContext = TriggerContext.builder().build();
+
+        var trigger = Trigger.builder()
+            .id("test-reject-autocommit")
+            .type(Trigger.class.getName())
+            .host(Property.ofValue("localhost"))
+            .stream(Property.ofValue("stream"))
+            .topic(Property.ofValue("topic"))
+            .autoCommit(Property.ofValue(false))
+            .build();
+
+        var ex = org.junit.jupiter.api.Assertions.assertThrows(
+            IllegalArgumentException.class,
+            () -> trigger.evaluate(conditionContext, triggerContext)
+        );
+        assertThat(ex.getMessage(), containsString("Trigger only supports autoCommit: true"));
+    }
+
+    @Test
+    void testTriggerRejectsNonNextStrategy() {
+        var runContext = runContextFactory.of();
+        var conditionContext = ConditionContext.builder().runContext(runContext).build();
+        var triggerContext = TriggerContext.builder().build();
+
+        var trigger = Trigger.builder()
+            .id("test-reject-strategy")
+            .type(Trigger.class.getName())
+            .host(Property.ofValue("localhost"))
+            .stream(Property.ofValue("stream"))
+            .topic(Property.ofValue("topic"))
+            .strategy(Property.ofValue(PollingKind.First))
+            .build();
+
+        var ex = org.junit.jupiter.api.Assertions.assertThrows(
+            IllegalArgumentException.class,
+            () -> trigger.evaluate(conditionContext, triggerContext)
+        );
+        assertThat(ex.getMessage(), containsString("Trigger only supports strategy: Next"));
     }
 }
