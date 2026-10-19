@@ -17,5 +17,5 @@ The Apache Iggy plugin is designed for UTF-8 text and JSON payloads. When publis
 
 ## Triggers
 
-- `Trigger` polls on a schedule (default 60 seconds) and starts one execution per batch of messages.
+- `Trigger` polls on a schedule (default 60 seconds) and starts one execution per batch of messages. Only `strategy: Next` and `autoCommit: true` are supported to prevent duplicate executions across scheduled evaluations. For other offset strategies or manual commit control, use the `Consume` task.
 - `RealtimeTrigger` listens to new messages in real-time and starts one execution per message as it arrives. When `autoCommit` is enabled (default `true`), consumer offsets are committed after the message is emitted downstream into the reactive pipeline (providing at-least-once delivery up to trigger emission). If the execution engine crashes after emission but before workflow execution finishes, the message will not be re-polled unless offsets are reset. Set `autoCommit: false` if you want to prevent automatic offset commits.

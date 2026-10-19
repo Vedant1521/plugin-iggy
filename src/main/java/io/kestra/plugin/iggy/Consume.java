@@ -314,14 +314,14 @@ public class Consume extends IggyConnection implements RunnableTask<Consume.Outp
 
     private boolean isEnded(int total, Instant pollStart, RunContext runContext) throws Exception {
         if (this.maxRecords != null) {
-            Integer max = runContext.render(this.maxRecords).as(Integer.class).orElse(null);
-            if (max != null && total >= max) {
+            var rMaxRecords = runContext.render(this.maxRecords).as(Integer.class).orElse(null);
+            if (rMaxRecords != null && total >= rMaxRecords) {
                 return true;
             }
         }
         if (this.maxDuration != null) {
-            Duration maxDur = runContext.render(this.maxDuration).as(Duration.class).orElse(null);
-            if (maxDur != null && !Instant.now().isBefore(pollStart.plus(maxDur))) {
+            var rMaxDuration = runContext.render(this.maxDuration).as(Duration.class).orElse(null);
+            if (rMaxDuration != null && !Instant.now().isBefore(pollStart.plus(rMaxDuration))) {
                 return true;
             }
         }

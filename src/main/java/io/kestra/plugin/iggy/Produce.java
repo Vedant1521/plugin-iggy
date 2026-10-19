@@ -169,50 +169,50 @@ public class Produce extends IggyConnection implements RunnableTask<Produce.Outp
         }
     }
 
-    private void ensureStreamAndTopic(RunContext runContext, IggyBaseClient client, StreamId streamId, String streamStr, TopicId topicId, String topicStr, boolean createIfMissing) {
-        boolean streamExists;
+    private void ensureStreamAndTopic(RunContext runContext, IggyBaseClient client, StreamId streamId, String rStream, TopicId topicId, String rTopic, boolean createIfMissing) {
+        var streamExists = false;
         try {
             streamExists = client.streams().getStream(streamId).isPresent();
         } catch (Exception e) {
-            runContext.logger().error("Error inspecting stream '{}': {}", streamStr, e.getMessage());
-            throw new RuntimeException("Failed to verify existence of stream '" + streamStr + "': " + e.getMessage(), e);
+            runContext.logger().error("Error inspecting stream '{}': {}", rStream, e.getMessage());
+            throw new RuntimeException("Failed to verify existence of stream '" + rStream + "': " + e.getMessage(), e);
         }
 
         if (!streamExists) {
             if (!createIfMissing) {
                 throw new IllegalArgumentException(
-                    "Stream '" + streamStr + "' does not exist. Please provision it beforehand or configure 'createIfMissing: true'."
+                    "Stream '" + rStream + "' does not exist. Please provision it beforehand or configure 'createIfMissing: true'."
                 );
             }
             try {
-                runContext.logger().info("Stream '{}' does not exist; creating stream...", streamStr);
-                client.streams().createStream(streamStr);
+                runContext.logger().info("Stream '{}' does not exist; creating stream...", rStream);
+                client.streams().createStream(rStream);
             } catch (Exception e) {
-                runContext.logger().error("Failed to auto-create stream '{}': {}", streamStr, e.getMessage());
-                throw new RuntimeException("Failed to create missing stream '" + streamStr + "': " + e.getMessage(), e);
+                runContext.logger().error("Failed to auto-create stream '{}': {}", rStream, e.getMessage());
+                throw new RuntimeException("Failed to create missing stream '" + rStream + "': " + e.getMessage(), e);
             }
         }
 
-        boolean topicExists;
+        var topicExists = false;
         try {
             topicExists = client.topics().getTopic(streamId, topicId).isPresent();
         } catch (Exception e) {
-            runContext.logger().error("Error inspecting topic '{}' in stream '{}': {}", topicStr, streamStr, e.getMessage());
-            throw new RuntimeException("Failed to verify existence of topic '" + topicStr + "' in stream '" + streamStr + "': " + e.getMessage(), e);
+            runContext.logger().error("Error inspecting topic '{}' in stream '{}': {}", rTopic, rStream, e.getMessage());
+            throw new RuntimeException("Failed to verify existence of topic '" + rTopic + "' in stream '" + rStream + "': " + e.getMessage(), e);
         }
 
         if (!topicExists) {
             if (!createIfMissing) {
                 throw new IllegalArgumentException(
-                    "Topic '" + topicStr + "' does not exist in stream '" + streamStr + "'. Please provision it beforehand or configure 'createIfMissing: true'."
+                    "Topic '" + rTopic + "' does not exist in stream '" + rStream + "'. Please provision it beforehand or configure 'createIfMissing: true'."
                 );
             }
             try {
-                runContext.logger().info("Topic '{}' does not exist in stream '{}'; creating topic...", topicStr, streamStr);
-                client.topics().createTopic(streamId, 1L, CompressionAlgorithm.None, BigInteger.ZERO, BigInteger.ZERO, Optional.empty(), topicStr);
+                runContext.logger().info("Topic '{}' does not exist in stream '{}'; creating topic...", rTopic, rStream);
+                client.topics().createTopic(streamId, 1L, CompressionAlgorithm.None, BigInteger.ZERO, BigInteger.ZERO, Optional.empty(), rTopic);
             } catch (Exception e) {
-                runContext.logger().error("Failed to auto-create topic '{}' in stream '{}': {}", topicStr, streamStr, e.getMessage());
-                throw new RuntimeException("Failed to create missing topic '" + topicStr + "' in stream '" + streamStr + "': " + e.getMessage(), e);
+                runContext.logger().error("Failed to auto-create topic '{}' in stream '{}': {}", rTopic, rStream, e.getMessage());
+                throw new RuntimeException("Failed to create missing topic '" + rTopic + "' in stream '" + rStream + "': " + e.getMessage(), e);
             }
         }
     }
